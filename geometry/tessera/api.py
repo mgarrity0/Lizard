@@ -68,6 +68,8 @@ class TessellateRequest(BaseModel):
     group: str = "p3"
     global_transform: ApiTransform = ApiTransform()
     clip_bounds: ApiClipBounds
+    lattice_scale: float = 1.0
+    anchor: tuple[float, float] = (0.0, 0.0)
 
 
 class ApiPlacedTile(BaseModel):
@@ -158,6 +160,8 @@ def create_app() -> FastAPI:
                     max_x=req.clip_bounds.max_x,
                     max_y=req.clip_bounds.max_y,
                 ),
+                lattice_scale=req.lattice_scale,
+                anchor=req.anchor,
             )
         except NotImplementedError as e:
             raise HTTPException(status_code=501, detail=str(e)) from e

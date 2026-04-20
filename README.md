@@ -187,14 +187,35 @@ expose via get_sidecar_base
 
 ## Tessellation (current: p3 only)
 
-`p3` is the Escher lizard group — 3-fold rotational symmetry, triangular/hex lattice. Three motifs per lattice cell rotated at 0°, 120°, 240°. Lattice basis:
+`p3` is the Escher lizard group — 3-fold rotational symmetry, triangular/hex lattice. Implementation in [geometry/tessera/tessellate.py](geometry/tessera/tessellate.py).
 
-```
-a = (L, 0)
-b = (L/2, L·√3/2)
-```
+**Algorithm**
 
-where `L = max(bbox_w, bbox_h) × 0.5` by default. The user drives actual scale via the Inspector's global transform. Placed tiles carry the per-motif `rotation_deg` so downstream extrusion and export have everything they need. p1 / p2 / p4 / p6 are stubbed but raise `NotImplementedError` until shipping the lizard end-to-end validates the pipeline.
+- Hex lattice with basis `a = (L, 0)`, `b = (L/2, L·√3/2)` where `L = max(motif bbox) × latticeScale`.
+- At each lattice point, place **three** copies of the motif rotated 0°/120°/240° around the motif's **anchor vertex** (which lands at the lattice point).
+- This is the correct algorithm for a properly-designed p3 motif — three copies interlocking around each 3-fold centre. For an *un*-designed motif (arbitrary SVG tracing), the same placement gives overlap because the edges don't match their 120° rotations. **The algorithm is right; the motif has to be right too.**
+
+**The Heesch construction (how to build a motif that will actually tile)**
+
+Based on the classical deformed-hexagon method documented at [danceswithferrets.org](https://danceswithferrets.org/geekblog/?p=154):
+
+1. Start with a regular hexagon, vertices V₀..V₅ at angles k·60° from centre.
+2. Alternating vertices V₀, V₂, V₄ are **pivots** — 3-fold rotation centres in the finished tiling.
+3. The six sides split into three "free/locked" pairs, one pair per pivot:
+   - Around V₀: free side V₀→V₁, locked side V₅→V₀.
+   - Around V₂: free side V₂→V₃, locked side V₁→V₂.
+   - Around V₄: free side V₄→V₅, locked side V₃→V₄.
+4. For each pair, design the **free** side as any polyline from pivot to next vertex. The **locked** side is determined by rotating the free side 120° CCW around the pivot and reversing it.
+5. The resulting closed polygon is a valid p3 fundamental domain. Three of its vertices (the pivots) are the 3-fold rotation centres; assembling the tile under p3 (three copies per pivot, translated by basis vectors) gives a gap-free, overlap-free tessellation.
+
+A reference generator lives at [geometry/scripts/generate_p3_tile.py](geometry/scripts/generate_p3_tile.py). It produces:
+
+- `assets/shapes/p3-hex-plain.svg` — the plain regular hexagon (straight signatures, sanity check).
+- `assets/shapes/p3-lizard-generated.svg` — a lizard-ish tile with parameterised bumps for head / legs / tail.
+
+Each also gets a sidecar `.json` with the exact pivot coordinates and lattice constant, so the anchor can be set programmatically instead of by eye.
+
+p1 / p2 / p4 / p6 are stubbed but raise `NotImplementedError`.
 
 ---
 
@@ -300,13 +321,17 @@ Lizards/                               ← local path; repo is github.com/mgarri
 | 3-panel UI shell               | done — ShapeLibrary / Viewport / Inspector                            |
 | R3F viewport                   | done — ortho camera, InstancedMesh LEDs, tile outlines, bloom         |
 | SVG import                     | done — `/api/shape/import` → polygon + symmetry hint                  |
-| p3 tessellation                | done — `/api/tessellate` + Tessellate button                          |
+| p3 tessellation (3 rotations per lattice point, anchor-driven) | done — `/api/tessellate` with `lattice_scale` + `anchor` |
+| Inspector controls             | done — global transform, lattice spacing, anchor X/Y, tessellate/map  |
 | LED → tile mapping             | done — `/api/map` + Map button + viewport colorize                    |
-| Pattern hot-reload plumbing    | done — Rust `notify` + React blob-URL import (not yet driving LEDs)   |
+| Pattern render loop            | done — `useFrame` in LedDots.tsx, drives InstancedMesh via mapping    |
+| Pattern hot-reload             | done — Rust `notify` + blob-URL dynamic import, reloads on file save  |
+| Seed patterns                  | done — `patterns/solid.js`, `patterns/tile-rainbow.js`                |
+| p3 motif generator (Heesch)    | done — `geometry/scripts/generate_p3_tile.py` + 2 seed SVGs           |
 | p1 / p2 / p4 / p6 tilers       | stubbed — raise `NotImplementedError`                                 |
 | LED layout editor (wiring UI)  | pending                                                               |
-| Pattern render loop            | pending — runtime ready, no tick wiring                               |
 | WLED UDP DDP + serial          | pending — port from VolumeCube                                        |
+| Single-lizard STL export       | pending                                                               |
 | Splitter                       | pending                                                               |
 | Exporters (3MF/STL/DXF/WLED)   | pending                                                               |
 | `docs/PROJECT_BRIEF.md`        | pending                                                               |

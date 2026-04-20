@@ -207,3 +207,7 @@
   border: 1px solid var(--border);
 }
 .viewport-info.dim { color: var(--fg-dim); }
+.viewport-info.error {
+  color: var(--down, #ff6b6b);
+  border-color: color-mix(in oklab, var(--down, #ff6b6b) 40%, var(--border));
+}

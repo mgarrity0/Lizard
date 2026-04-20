@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, selectActivePanel, selectActiveShape } from '../state/store';
 import type { ColorOrderName, PlacedTile, Mapping } from '../core/structure';
 import { tessellate, mapLedsToTiles } from '../core/api';
+import { listPatterns, onPatternsChanged } from '../core/patternRuntime';
 
 const COLOR_ORDERS: ColorOrderName[] = ['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR'];
 
@@ -11,9 +12,41 @@ export function Inspector() {
   const updatePanel = useStore((s) => s.updatePanel);
   const colorConfig = useStore((s) => s.colorConfig);
   const setColorConfig = useStore((s) => s.setColorConfig);
+  const activePatternPath = useStore((s) => s.project.activePatternPath);
+  const setActivePattern = useStore((s) => s.setActivePattern);
+  const playing = useStore((s) => s.playing);
+  const setPlaying = useStore((s) => s.setPlaying);
 
   const [busy, setBusy] = useState<'idle' | 'tessellate' | 'map'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [patternNames, setPatternNames] = useState<string[]>([]);
+
+  // Populate pattern list on mount and whenever the watcher fires.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const names = await listPatterns();
+      if (!cancelled) setPatternNames(names);
+    };
+    refresh();
+    let unsub: (() => void) | null = null;
+    (async () => {
+      unsub = await onPatternsChanged(() => {
+        refresh();
+      });
+    })();
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, []);
+
+  // Default to the first pattern once the list comes in.
+  useEffect(() => {
+    if (!activePatternPath && patternNames.length > 0) {
+      setActivePattern(patternNames[0]);
+    }
+  }, [patternNames, activePatternPath, setActivePattern]);
 
   const transform = panel.tiling.globalTransform;
 
@@ -36,6 +69,8 @@ export function Inspector() {
           max_x: panel.tiling.clipBounds.maxX,
           max_y: panel.tiling.clipBounds.maxY,
         },
+        lattice_scale: panel.tiling.latticeScale,
+        anchor: panel.tiling.rotationAnchor,
       });
       const tiles: PlacedTile[] = resp.tiles.map((t) => ({
         id: t.tile_id,
@@ -197,6 +232,48 @@ export function Inspector() {
             })
           }
         />
+        <Slider
+          label="Lattice spacing"
+          value={panel.tiling.latticeScale}
+          min={0.2}
+          max={3}
+          step={0.01}
+          onChange={(v) =>
+            updatePanel(panel.id, {
+              tiling: { ...panel.tiling, latticeScale: v },
+            })
+          }
+        />
+        <Slider
+          label="Anchor X (motif units)"
+          value={panel.tiling.rotationAnchor[0]}
+          min={-400}
+          max={400}
+          step={1}
+          onChange={(v) =>
+            updatePanel(panel.id, {
+              tiling: {
+                ...panel.tiling,
+                rotationAnchor: [v, panel.tiling.rotationAnchor[1]],
+              },
+            })
+          }
+        />
+        <Slider
+          label="Anchor Y (motif units)"
+          value={panel.tiling.rotationAnchor[1]}
+          min={-400}
+          max={400}
+          step={1}
+          onChange={(v) =>
+            updatePanel(panel.id, {
+              tiling: {
+                ...panel.tiling,
+                rotationAnchor: [panel.tiling.rotationAnchor[0], v],
+              },
+            })
+          }
+        />
       </section>
 
       <section className="section">
@@ -222,6 +299,39 @@ export function Inspector() {
           </div>
           {error ? <div className="hint error">{error}</div> : null}
           {!shape ? <div className="hint dim">Import an SVG shape first.</div> : null}
+        </div>
+      </section>
+
+      <section className="section">
+        <h3>Playback</h3>
+        <Field label="Pattern">
+          <select
+            value={activePatternPath ?? ''}
+            onChange={(e) => setActivePattern(e.target.value || null)}
+          >
+            {patternNames.length === 0 ? (
+              <option value="">(none)</option>
+            ) : null}
+            {patternNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="stack">
+          <button
+            className="btn"
+            disabled={!activePatternPath}
+            onClick={() => setPlaying(!playing)}
+          >
+            {playing ? 'Pause' : 'Play'}
+          </button>
+          {mappedLeds === 0 ? (
+            <div className="hint dim">
+              Map LEDs first to see tile-driven patterns light up.
+            </div>
+          ) : null}
         </div>
       </section>
 

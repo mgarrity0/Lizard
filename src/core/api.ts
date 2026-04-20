@@ -108,6 +108,8 @@ export type TessellateRequest = {
     offset: [number, number];
   };
   clip_bounds: { min_x: number; min_y: number; max_x: number; max_y: number };
+  lattice_scale?: number;
+  anchor?: [number, number];
 };
 
 export type TessellateResponse = {

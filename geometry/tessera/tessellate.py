@@ -1,18 +1,20 @@
 """Wallpaper-group tessellation.
 
-v1 specializes the p3 group (3-fold rotational symmetry, no reflection) —
-the group Escher's lizard lives in. Other wallpaper groups (p1, p2, p4, p6)
-will be generalized in later milestones.
+v1 implements p3: three motifs per lattice point, each rotated 0°/120°/240°
+around the motif's ``anchor`` vertex (which lands AT the lattice point).
+For a properly p3-designed motif (e.g. an Escher lizard), this produces
+true Escher-style interlock with zero gaps and zero overlap.
 
-Algorithm (p3):
-  * Three lizards per hex vertex, rotated 0°, 120°, 240° about that vertex.
-  * Hex lattice with basis vectors a=(L,0), b=(L/2, L*sqrt(3)/2) in native
-    motif units. L is the lattice constant — for a correctly-designed Escher
-    motif, L equals the motif's circumscribing-hexagon edge length.
+For an *un*designed motif the same algorithm produces overlap (because the
+motif edges don't match their 120° rotations) — it's the user's job to
+supply a p3 tile and to set the anchor to one of the motif's 3-fold
+rotation centres (a specific vertex on the outline, not the centroid).
 
-We don't *solve* for L here — the user drives it via
-``tiling.globalTransform.scale``. For an Escher lizard polygon exported at
-"canonical" size, scale = 1 should already tile cleanly.
+Algorithm:
+  * Hex lattice, basis a=(L,0), b=(L/2, L·√3/2) in motif-local units.
+  * At each lattice point, place 3 motif copies rotated 0°/120°/240°
+    about ``anchor``. The anchor of each copy lands at the lattice point.
+  * L defaults to max(motif bbox); users tune via ``lattice_scale``.
 """
 
 from __future__ import annotations
@@ -56,9 +58,11 @@ def tessellate(
     group: Group,
     global_transform: Transform2D,
     clip_bounds: ClipBounds,
+    lattice_scale: float = 1.0,
+    anchor: tuple[float, float] = (0.0, 0.0),
 ) -> list[PlacedTile]:
     if group == "p3":
-        return _tessellate_p3(polygon, global_transform, clip_bounds)
+        return _tessellate_p3(polygon, global_transform, clip_bounds, lattice_scale, anchor)
     raise NotImplementedError(f"group {group} not implemented yet")
 
 
@@ -69,15 +73,18 @@ def _tessellate_p3(
     motif: list[tuple[float, float]],
     gt: Transform2D,
     clip: ClipBounds,
+    lattice_scale: float,
+    anchor: tuple[float, float],
 ) -> list[PlacedTile]:
-    # Derive a lattice constant from the motif's bounding box. This picks a
-    # reasonable default for a motif whose circumscribing hexagon has edge
-    # ~= bounding-box half-width. Users tune ``scale`` until it tessellates.
+    # Derive a lattice constant from the motif's bounding box. Default picks
+    # the larger bbox dimension so three rotated copies at each lattice point
+    # roughly touch without overlapping; ``lattice_scale`` lets the user
+    # dial it in (values <1 tighten, >1 loosen).
     arr = np.asarray(motif, dtype=float)
     bbox_w = float(arr[:, 0].max() - arr[:, 0].min())
     bbox_h = float(arr[:, 1].max() - arr[:, 1].min())
-    motif_span = max(bbox_w, bbox_h) * 0.5
-    lattice_const = motif_span
+    motif_span = max(bbox_w, bbox_h)
+    lattice_const = motif_span * max(lattice_scale, 0.01)
 
     # Hex lattice basis in motif-local units.
     ax, ay = lattice_const, 0.0
@@ -97,6 +104,7 @@ def _tessellate_p3(
     rot_global = math.radians(gt.rotation_deg)
     cos_g = math.cos(rot_global)
     sin_g = math.sin(rot_global)
+    ax_anchor, ay_anchor = anchor
 
     placed: list[PlacedTile] = []
     tile_counter = 0
@@ -105,20 +113,24 @@ def _tessellate_p3(
         for j in range(-n, n + 1):
             cx = i * ax + j * bx
             cy = i * ay + j * by
-            # Three motifs per lattice point, rotated 0/120/240 about (cx,cy).
+            # Three motifs per lattice point, rotated 0/120/240 about the
+            # motif's anchor (which lands AT the lattice point).
             for k in range(3):
                 theta = math.radians(120 * k)
                 cos_l = math.cos(theta)
                 sin_l = math.sin(theta)
                 pts: list[tuple[float, float]] = []
                 for x, y in motif:
-                    # Rotate motif about its own origin by (theta).
-                    rx = x * cos_l - y * sin_l
-                    ry = x * sin_l + y * cos_l
-                    # Translate to lattice point.
+                    # Move motif so the anchor sits at origin.
+                    tx = x - ax_anchor
+                    ty = y - ay_anchor
+                    # Rotate about the anchor (now at origin).
+                    rx = tx * cos_l - ty * sin_l
+                    ry = tx * sin_l + ty * cos_l
+                    # Place anchor at the lattice point.
                     lx = rx + cx
                     ly = ry + cy
-                    # Apply global transform: scale, then rotate, then offset.
+                    # Apply global transform: scale, rotate, offset.
                     sx = lx * s
                     sy = ly * s
                     gx = sx * cos_g - sy * sin_g + gt.offset[0]

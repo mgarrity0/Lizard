@@ -52,6 +52,13 @@ export type Tiling = {
   // Applied to the whole tiling after placement: uniform scale / rotate /
   // translate for global fitting.
   globalTransform: TileTransform;
+  // Multiplies the auto-derived lattice constant. 1.0 = use motif bbox as-is;
+  // <1 packs tiles tighter; >1 spreads them out.
+  latticeScale: number;
+  // Point in motif-local coords (the centered polygon) where the three
+  // rotated copies pivot. For a proper p3 tile this is a specific vertex
+  // of the motif — a 3-fold rotation centre. Scrub X/Y to find it by eye.
+  rotationAnchor: [number, number];
   // Bounding box of the panel in world mm (LEDs that fall outside are
   // dropped).
   clipBounds: { minX: number; minY: number; maxX: number; maxY: number };

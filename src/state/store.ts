@@ -23,6 +23,8 @@ function defaultPanel(): Panel {
       shapeId: '',
       group: 'p3',
       globalTransform: { scale: 1, rotationDeg: 0, offset: [0, 0] },
+      latticeScale: 1,
+      rotationAnchor: [0, 0],
       clipBounds: { minX: -160, minY: -160, maxX: 160, maxY: 160 },
       tiles: [],
     },
@@ -46,12 +48,14 @@ export type UiState = {
   activePanelId: string;
   activeShapeId: string | null;
   colorConfig: ColorConfig;
+  playing: boolean;
 
   addShape: (shape: Shape) => void;
   setActiveShape: (id: string | null) => void;
   updatePanel: (id: string, patch: Partial<Panel>) => void;
   setColorConfig: (patch: Partial<ColorConfig>) => void;
   setActivePattern: (path: string | null) => void;
+  setPlaying: (p: boolean) => void;
 };
 
 export const useStore = create<UiState>((set) => ({
@@ -59,6 +63,7 @@ export const useStore = create<UiState>((set) => ({
   activePanelId: 'panel-0',
   activeShapeId: null,
   colorConfig: defaultColorConfig,
+  playing: false,
 
   addShape: (shape) =>
     set((s) => ({
@@ -83,6 +88,8 @@ export const useStore = create<UiState>((set) => ({
 
   setActivePattern: (path) =>
     set((s) => ({ project: { ...s.project, activePatternPath: path } })),
+
+  setPlaying: (p) => set({ playing: p }),
 }));
 
 export function selectActivePanel(s: UiState): Panel {
