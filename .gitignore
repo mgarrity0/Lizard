@@ -1,0 +1,51 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Claude Code local session config
+.claude/
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*
+!.env.example
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+
+# Python / uv
+geometry/.venv/
+geometry/dist/
+geometry/build/
+geometry/*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# PyInstaller sidecar bundles
+geometry/pyinstaller_dist/
+
+# Tessera output (user exports)
+exports/
+projects/*.json
+!projects/.gitkeep
+
+# Logs
+*.log
+logs/
