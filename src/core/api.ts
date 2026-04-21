@@ -142,3 +142,49 @@ export type MapResponse = {
 export async function mapLedsToTiles(req: MapRequest): Promise<MapResponse> {
   return await apiPost<MapResponse>("/api/map", req);
 }
+
+// ---------- exports ----------
+
+export type StlExportRequest = {
+  polygon: Array<[number, number]>;
+  height_mm?: number;
+  out_path: string;
+  name?: string;
+  // When > 0, extrude an annular ring of this thickness instead of a
+  // solid plate. Useful for diffuser retainers / stand-offs.
+  wall_thickness_mm?: number;
+  // When > 0 AND wall_thickness_mm > 0, cap the hollow shape with a
+  // solid top of this thickness. Walls shorten to (height - cap).
+  cap_thickness_mm?: number;
+};
+
+export type StlExportResponse = { path: string };
+
+export async function exportStl(
+  req: StlExportRequest,
+): Promise<StlExportResponse> {
+  return await apiPost<StlExportResponse>("/api/export/stl", req);
+}
+
+export type WledExportRequest = {
+  tile_leds: Record<string, number[]>;
+  total_leds: number;
+  out_dir: string;
+  preset_id?: number;
+  preset_name?: string;
+  ledmap_id?: number;
+};
+
+export type WledExportResponse = {
+  mapping_path: string;
+  ledmap_path: string;
+  preset_path: string;
+  segments: number;
+  mapped_leds: number;
+};
+
+export async function exportWled(
+  req: WledExportRequest,
+): Promise<WledExportResponse> {
+  return await apiPost<WledExportResponse>("/api/export/wled", req);
+}

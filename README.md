@@ -161,12 +161,13 @@ Request/response types are duplicated in Python (Pydantic models in [geometry/te
 | Method | Path                  | Purpose                                                       | Status |
 |--------|-----------------------|---------------------------------------------------------------|--------|
 | GET    | `/api/health`         | Liveness probe used by the Rust supervisor                    | done   |
-| POST   | `/api/shape/import`   | SVG → shapely Polygon + symmetry hint                         | done   |
+| POST   | `/api/shape/import`   | SVG → shapely Polygon + symmetry hint + auto-detected pivots  | done   |
 | POST   | `/api/tessellate`     | Polygon + group + transform + clip → `PlacedTile[]`           | done (p3 only) |
 | POST   | `/api/map`            | Tiles + LED positions → `tileId → ledIndices[]`               | done   |
+| POST   | `/api/export/stl`     | Polygon → extruded STL (solid plate, hollow ring, or capped hollow) | done |
+| POST   | `/api/export/wled`    | Mapping → WLED preset JSON + ledmap + raw mapping dump        | done   |
 | POST   | `/api/split`          | Panel + bed size → modules with tab+slot registration         | pending |
 | POST   | `/api/export/threemf` | Module + wall height + skin thickness → 3MF file path         | pending |
-| POST   | `/api/export/stl/*`   | Spacer frame, registration jig                                | pending |
 | POST   | `/api/export/dxf`     | Laser-cut overlay                                             | pending |
 
 ### Startup handshake
@@ -248,6 +249,47 @@ This is deterministic and handles LEDs on tile boundaries sensibly.
 
 ---
 
+## Exports
+
+All exports are non-destructive: every click of an Export button writes into a fresh timestamped directory under `exports/<project>/<ISO-8601-stamp>/` next to the project root. Nothing is overwritten.
+
+### STL (lizard diffuser caps)
+
+`POST /api/export/stl` — extrudes the active shape's polygon, scaled by the current `globalTransform.scale`, into an `.stl` file. Three modes, all controlled from the Inspector's Export section:
+
+| Mode             | Params                                         | Shape                                                                 |
+|------------------|------------------------------------------------|-----------------------------------------------------------------------|
+| **Solid plate**  | `height_mm` only                               | Flat extrusion of the full polygon — a decorative relief.             |
+| **Hollow ring**  | `height_mm`, `wall_thickness_mm > 0`           | Lizard-outlined picture frame, open top and bottom. Stands off the LED surface. |
+| **Capped hollow** | `height_mm`, `wall_thickness_mm`, `cap_thickness_mm` | Walls from z=0 to (height − cap) plus a solid lid on top. The useful shape for a diffuser cap over an LED cluster. |
+
+Hollow modes inset the polygon by `wall_thickness_mm` using shapely's mitre-joined negative buffer; the ring is `polygon − inner`. Capped mode concatenates the ring extrusion with a full-polygon extrusion positioned at z = (height − cap). The interface between walls and cap coincides at one z plane; modern slicers (Bambu Studio, Cura, PrusaSlicer) weld it automatically so the seam is invisible in the printed part.
+
+Thickness guards: if `wall_thickness_mm` exceeds the shape's narrowest feature the inset collapses to empty and the server returns HTTP 400 with a readable message that the Inspector surfaces inline.
+
+Because p3 rotates one canonical motif, a single `lizard.stl` is enough to print every tile in the tessellation — user rotates copies by hand at placement time.
+
+### WLED preset + ledmap
+
+`POST /api/export/wled` writes three files in one call:
+
+1. **`mapping.json`** — human-readable `{tileId: [physical_led_indices]}`, useful as reference / for downstream tooling.
+2. **`ledmap1.json`** — WLED ledmap. Each lizard's LEDs are packed into a contiguous run in logical space. Upload to the ESP32 via WLED's filesystem editor (`/edit`) and enable it under Settings → LED Preferences → Ledmap.
+3. **`wled-preset.json`** — one segment per lizard, referencing the contiguous ranges in the ledmapped chain. Import via Config → Presets → Restore.
+
+Why the ledmap matters: WLED segments span only contiguous chain-index ranges, but a lizard's LEDs are typically discontiguous in the serpentine chain. Without the ledmap, a per-lizard segment would have to use `[min, max+1)` and leak into neighbouring lizards. The ledmap reorders physical LEDs so each lizard's logical range is clean — then the preset segments isolate perfectly.
+
+Segments default to solid white at 78% brightness (`fx=0`, `bri=200`, `col=[[128,128,128],…]`); edit in the WLED UI or overwrite programmatically before saving. Segment name (`n` field) is the `tileId` for traceability.
+
+### Physical deploy flow
+
+1. Export STL (capped hollow), slice in Bambu Studio, print N copies (one per tile — same mold rotated by hand at placement).
+2. Flash WLED to your ESP32. Upload `ledmap1.json` via `/edit`, enable it.
+3. Import `wled-preset.json` via Config → Presets → Restore; activate preset 1.
+4. Each lizard is now an addressable WLED segment — set its colour / effect / brightness independently, or drive with the live UDP DDP stream (pending).
+
+---
+
 ## Repo layout
 
 ```
@@ -307,22 +349,23 @@ Lizards/                               ← local path; repo is github.com/mgarri
 
 ## End-to-end target: the lizard panel
 
+Pivoted from the earlier "single multi-material 3MF per panel module" plan to **individual printed lizard caps, hand-placed** — simpler prints, easier iteration.
+
 1. Drop `assets/shapes/lizard.svg` in place — root carries `data-p3-pivots="..."` from `find_pivots.py` so import auto-seeds the rotation anchor and lattice constant.
-2. App loads SVG → shapely Polygon → warns on gap/overlap > ε.
-3. Scale slider: default lizard span ≈ 55 mm → ~25–36 LEDs/cell at 10 mm pitch.
-4. LED layout editor: 32×32 grid, 10 mm pitch, wiring topology picker.
-5. **Tessellate** button fills the 32×32 clip bounds with p3 lattice.
-6. **Map LEDs** button assigns each LED to a tile (majority-area + centroid fallback).
-7. Panel splitter breaks the full panel into ≤250×210 mm Bambu A1 modules with tab+slot registration; tile assignment preserved across splits.
-8. Exports:
-   - One 3MF per module (walls mat-index 0, skin mat-index 1 — Bambu AMS reads this directly).
-   - `spacer-frame.stl` — 10 mm standoff around the LED PCB footprint.
-   - `registration-jig.stl` — thin plate with 10 mm grid holes for assembling 4 panels.
-   - `acrylic-overlay.dxf` — lizard outlines only, laser-cut alternative to printed skin.
-   - `wled-preset.json` — one segment per lizard, stable IDs.
-   - Optional: `panel.ino` — FastLED bake of a chosen pattern.
-9. Live preview: pick a pattern from `patterns/`, press Play, UDP DDP streams at 60 fps. Viewport shows bloomed LEDs inside lizard tiles.
-10. Verify: print one module, mount LEDs, flash WLED, apply preset, run a pattern → each lizard lights independently.
+2. App loads SVG → shapely Polygon.
+3. Inspector Panel section: set cols / rows / pitch to match your strip (default 32 × 32 @ 10 mm; auto-rebuilds positions + clip bounds).
+4. Shape transform: scale the lizard so its body spans ~55 mm — each tile covers ~25–36 LEDs at 10 mm pitch.
+5. **Tessellate** button fills the clip bounds with p3 lattice (3 rotated copies per lattice point).
+6. **Map LEDs to tiles** assigns each LED to a lizard (majority-area + centroid fallback).
+7. **Play** a pattern in the viewport to verify the mapping visually — `contrast-tiles.js` graph-colours neighbours so every lizard is distinct from its six nearest.
+8. Export section:
+   - **Export lizard STL** with Hollow + Cap thickness → `exports/.../lizard.stl`. One file, used for every tile (rotate by hand at placement).
+   - **Export WLED preset + ledmap** → `mapping.json`, `ledmap1.json`, `wled-preset.json` (one segment per lizard, cleanly isolated via the ledmap).
+9. Physical assembly:
+   - Slice the STL in Bambu Studio, print N copies on black or white PETG.
+   - Flash WLED to the ESP32, upload the ledmap via `/edit`, restore the preset.
+   - Place each printed cap over its LED cluster — caps sit on the PCB via their hollow walls, the top cap diffuses the LEDs underneath.
+10. Verify: activate preset → each lizard lights independently, graph-coloured pattern confirms the mapping.
 
 ---
 
@@ -337,35 +380,36 @@ Lizards/                               ← local path; repo is github.com/mgarri
 | SVG import                     | done — `/api/shape/import` → polygon + symmetry hint                  |
 | p3 tessellation (3 rotations per lattice point, anchor-driven) | done — `/api/tessellate` with `lattice_scale` + `anchor` |
 | Inspector controls             | done — global transform, lattice spacing, anchor X/Y, tessellate/map  |
+| LED layout editor              | done — cols / rows / pitch inputs, auto-rebuild grid + clip bounds    |
 | LED → tile mapping             | done — `/api/map` + Map button + viewport colorize                    |
 | Pattern render loop            | done — `useFrame` in LedDots.tsx, drives InstancedMesh via mapping    |
 | Pattern hot-reload             | done — Rust `notify` + blob-URL dynamic import, reloads on file save  |
 | Seed patterns                  | done — `solid.js`, `tile-rainbow.js`, `contrast-tiles.js` (graph-coloured) |
 | p3 motif generator (Heesch)    | done — `geometry/scripts/generate_p3_tile.py` + 2 seed SVGs           |
 | Hand-drawn lizard p3 import    | done — `find_pivots.py` auto-detects, 0.0138% gap, 98.26% coverage    |
+| Lizard STL export              | done — `/api/export/stl`: solid / hollow ring / capped hollow modes   |
+| WLED preset + ledmap           | done — `/api/export/wled`: ledmapped contiguous segments per lizard   |
 | p1 / p2 / p4 / p6 tilers       | stubbed — raise `NotImplementedError`                                 |
-| LED layout editor (wiring UI)  | pending                                                               |
-| WLED UDP DDP + serial          | pending — port from VolumeCube                                        |
-| Single-lizard STL export       | pending                                                               |
-| Splitter                       | pending                                                               |
-| Exporters (3MF/STL/DXF/WLED)   | pending                                                               |
+| Wiring topology picker         | pending — chain vs multi-output UI (cols/rows is in)                  |
+| WLED UDP DDP + serial          | pending — port from VolumeCube, requires flashed hardware             |
+| Splitter                       | pending — not needed for single-lizard-print workflow                 |
+| 3MF / DXF exporters            | pending — walls+skin multi-material, laser-cut overlays               |
+| FastLED `.ino` bake            | pending — standalone microcontroller alternative to WLED              |
 | `docs/PROJECT_BRIEF.md`        | pending                                                               |
 
 ---
 
 ## Next steps
 
-In rough priority order — each one unblocks something physical.
+What's left, in rough priority order. Each one unblocks something physical.
 
-1. **LED layout editor.** Replace the hard-coded 32×32 grid with a UI for picking pitch (10 mm), grid size, wiring topology (single serpentine vs multi-output), and per-output start corner. Needed before WLED preset export can produce sensible segment IDs. *Touches:* `src/components/Inspector.tsx`, `src/state/store.ts`, new `LayoutEditor.tsx`, `src/core/structure.ts` (`LedLayout`).
-2. **WLED UDP DDP client (Rust).** Port from VolumeCube. Tauri command `start_ddp(host, port)` spawns a tokio task that drains a frame channel and pushes packets to `udp://host:4048` at 60 fps. The webview hands it the same `Uint8Array` it already builds for the viewport. *Touches:* `src-tauri/src/lib.rs`, new `src-tauri/src/ddp.rs`, `src/core/patternRuntime.ts` (frame producer).
-3. **Single-lizard STL export.** Smallest end-to-end print test: extrude one lizard polygon to wall height, drop it as STL, slice it on the A1, glue an LED behind it. Validates extrusion + scale-to-mm + the printed-tile-fits-the-render assumption before splitter and 3MF complexity. *Touches:* new `geometry/tessera/extrude.py` (trimesh), `POST /api/export/stl/tile`, button in Inspector.
-4. **Panel splitter.** Tile a region, split into ≤250×210 mm Bambu A1 modules with tab+slot registration on the cut edges, preserve `tileId → moduleId`. *Touches:* new `geometry/tessera/split.py`, `POST /api/split`.
-5. **Multi-material 3MF (walls + skin).** trimesh + `lib3mf` or python wrappers around the 3MF spec. One mesh per material slot, mat-index 0 = black PETG walls, mat-index 1 = white PETG diffuser skin. Bambu AMS reads the slot index directly. *Touches:* new `geometry/tessera/threemf.py`, `POST /api/export/threemf`.
-6. **WLED preset JSON exporter.** One segment per lizard, stable IDs derived from `tileId`. Reuse Orbiter's preset shape. *Touches:* new `geometry/tessera/wled.py` or TS-side exporter (it's pure data).
-7. **Auxiliary STL/DXF.** Spacer frame around LED PCB footprint, registration jig with grid holes, acrylic-overlay DXF as a laser-cut alternative to the printed skin.
-8. **Pattern library expansion.** `contrast-tiles.js` is the start. Targets: animated waves that *respect* the graph-colouring (so motion doesn't reintroduce neighbour-blending), audio reactive (port from Orbiter), motion reactive (IMU input → tilt-driven palette).
-9. **`docs/PROJECT_BRIEF.md`.** Long-form design doc — the README is the public face; the brief captures the why for future-Matt.
+1. **Print + flash + light.** The pipeline is now complete through exports. Actual critical path: slice one `lizard.stl` on the A1, print N copies, flash WLED to the ESP32, upload `ledmap1.json` + `wled-preset.json`, mount the caps over the panel, verify each lizard lights independently. This validates every assumption the code makes about mm-scale, pitch, chain wiring, and colour order.
+2. **WLED UDP DDP client (Rust).** Port from VolumeCube. Tauri command `start_ddp(host, port)` spawns a tokio task that drains a frame channel and pushes packets to `udp://host:4048` at 60 fps. The webview hands it the same `Uint8Array` it already builds for the viewport. *Touches:* `src-tauri/src/lib.rs`, new `src-tauri/src/ddp.rs`, `src/core/patternRuntime.ts` (frame producer). Gated on real hardware being wired up.
+3. **Wiring topology picker.** Cols / rows / pitch are editable; the serpentine chain is assumed. For multi-output controllers (several parallel chains off the ESP32), add a wiring editor that lets you pick per-output start-corner + direction. Needed to generate correct WLED ledmaps for non-single-chain builds.
+4. **Pattern library expansion.** `contrast-tiles.js` is the start. Targets: animated waves that *respect* the graph-colouring (so motion doesn't reintroduce neighbour-blending), audio reactive (port from Orbiter), motion reactive (IMU input → tilt-driven palette).
+5. **FastLED `.ino` bake.** Compile a chosen pattern to a standalone Arduino sketch for the ESP32 — alternative to WLED. Useful if you want the panel to run without a network. Port from Orbiter.
+6. **Multi-material 3MF (walls + skin).** If you end up wanting a single monolithic panel instead of discrete lizard caps: trimesh + `lib3mf` with mat-index 0 = black PETG walls, mat-index 1 = white PETG diffuser skin. Bambu AMS reads the slot index directly.
+7. **Panel splitter, auxiliary STL/DXF, `docs/PROJECT_BRIEF.md`.** All pending but not on the critical path to a lit panel.
 
 The lizard panel is the gate for declaring v1 done. Once one printed module is on the wall with WLED running a preset Tessera generated, the architecture has been validated end-to-end and the remaining work is breadth (more groups, more shapes, more outputs).
 

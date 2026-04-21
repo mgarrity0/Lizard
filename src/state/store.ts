@@ -8,8 +8,10 @@
 
 import { create } from 'zustand';
 import {
+  buildRectGrid,
   default32x32Grid,
   emptyMapping,
+  gridClipBounds,
   type Panel,
   type Project,
   type Shape,
@@ -17,6 +19,7 @@ import {
 import { defaultColorConfig, type ColorConfig } from '../core/colorSpace';
 
 function defaultPanel(): Panel {
+  const ledLayout = default32x32Grid(10);
   return {
     id: 'panel-0',
     tiling: {
@@ -25,10 +28,10 @@ function defaultPanel(): Panel {
       globalTransform: { scale: 1, rotationDeg: 0, offset: [0, 0] },
       latticeScale: 1,
       rotationAnchor: [0, 0],
-      clipBounds: { minX: -160, minY: -160, maxX: 160, maxY: 160 },
+      clipBounds: gridClipBounds(ledLayout, 5),
       tiles: [],
     },
-    ledLayout: default32x32Grid(10),
+    ledLayout,
     mapping: emptyMapping(),
   };
 }
@@ -53,6 +56,7 @@ export type UiState = {
   addShape: (shape: Shape) => void;
   setActiveShape: (id: string | null) => void;
   updatePanel: (id: string, patch: Partial<Panel>) => void;
+  resizeLedGrid: (id: string, cols: number, rows: number, pitchMm: number) => void;
   setColorConfig: (patch: Partial<ColorConfig>) => void;
   setActivePattern: (path: string | null) => void;
   setPlaying: (p: boolean) => void;
@@ -96,6 +100,37 @@ export const useStore = create<UiState>((set) => ({
         panels: s.project.panels.map((p) =>
           p.id === id ? { ...p, ...patch } : p
         ),
+      },
+    })),
+
+  // Rebuild the rectangular grid. Any change to cols / rows / pitch
+  // invalidates LED index references, so mapping AND placed tiles are
+  // reset — the user re-runs Tessellate + Map LEDs. The clip bounds auto-
+  // fit to the new grid with a 5 mm margin.
+  resizeLedGrid: (id, cols, rows, pitchMm) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        panels: s.project.panels.map((p) => {
+          if (p.id !== id) return p;
+          const existing = p.ledLayout;
+          const nextLayout = buildRectGrid(
+            cols,
+            rows,
+            pitchMm,
+            existing.colorOrder,
+          );
+          return {
+            ...p,
+            ledLayout: nextLayout,
+            mapping: emptyMapping(),
+            tiling: {
+              ...p.tiling,
+              tiles: [],
+              clipBounds: gridClipBounds(nextLayout, 5),
+            },
+          };
+        }),
       },
     })),
 

@@ -95,6 +95,10 @@ export type LedLayout = {
   // Physical LED pitch in mm (used only for layout UI; the positions are
   // authoritative).
   pitchMm: number;
+  // Grid dimensions of the rectangular LED array. Stored so the UI can
+  // display + edit them; positions is still the ground truth for mapping.
+  cols: number;
+  rows: number;
   colorOrder: ColorOrderName;
 };
 
@@ -182,32 +186,57 @@ export function totalLedCount(layout: LedLayout): number {
 
 // ---------- defaults for the lizard panel ----------
 
-// 32 x 32 @ 10mm pitch = a 320mm square centred on origin.
-export function default32x32Grid(pitchMm = 10): LedLayout {
-  const n = 32;
+// Rectangular cols × rows grid centred on origin, serpentine-wired.
+// Row 0 runs left-to-right, row 1 right-to-left, etc.
+export function buildRectGrid(
+  cols: number,
+  rows: number,
+  pitchMm: number,
+  colorOrder: ColorOrderName = 'GRB',
+): LedLayout {
+  const c = Math.max(1, Math.floor(cols));
+  const r = Math.max(1, Math.floor(rows));
   const positions: Array<[number, number]> = [];
-  const half = ((n - 1) * pitchMm) / 2;
-  // Serpentine chain: row 0 left-to-right, row 1 right-to-left, etc.
-  const order: number[] = [];
-  for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n; col++) {
-      positions.push([col * pitchMm - half, row * pitchMm - half]);
+  const halfX = ((c - 1) * pitchMm) / 2;
+  const halfY = ((r - 1) * pitchMm) / 2;
+  for (let row = 0; row < r; row++) {
+    for (let col = 0; col < c; col++) {
+      positions.push([col * pitchMm - halfX, row * pitchMm - halfY]);
     }
   }
-  for (let row = 0; row < n; row++) {
-    const base = row * n;
+  const order: number[] = [];
+  for (let row = 0; row < r; row++) {
+    const base = row * c;
     if (row % 2 === 0) {
-      for (let col = 0; col < n; col++) order.push(base + col);
+      for (let col = 0; col < c; col++) order.push(base + col);
     } else {
-      for (let col = n - 1; col >= 0; col--) order.push(base + col);
+      for (let col = c - 1; col >= 0; col--) order.push(base + col);
     }
   }
   return {
     positions,
     wiring: { kind: 'chain', order },
     pitchMm,
-    colorOrder: 'GRB',
+    cols: c,
+    rows: r,
+    colorOrder,
   };
+}
+
+// 32 x 32 @ 10mm pitch = a 320mm square centred on origin.
+export function default32x32Grid(pitchMm = 10): LedLayout {
+  return buildRectGrid(32, 32, pitchMm);
+}
+
+// Axis-aligned bounding box of a rectangular LED grid, with an optional
+// margin (in mm) to leave breathing room around the outermost LEDs.
+export function gridClipBounds(
+  layout: LedLayout,
+  marginMm = 0,
+): { minX: number; minY: number; maxX: number; maxY: number } {
+  const halfX = ((layout.cols - 1) * layout.pitchMm) / 2 + marginMm;
+  const halfY = ((layout.rows - 1) * layout.pitchMm) / 2 + marginMm;
+  return { minX: -halfX, minY: -halfY, maxX: halfX, maxY: halfY };
 }
 
 export function emptyMapping(): Mapping {

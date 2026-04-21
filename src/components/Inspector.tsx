@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useStore, selectActivePanel, selectActiveShape } from '../state/store';
 import type { ColorOrderName, PlacedTile, Mapping } from '../core/structure';
-import { tessellate, mapLedsToTiles } from '../core/api';
-import { listPatterns, onPatternsChanged } from '../core/patternRuntime';
+import { tessellate, mapLedsToTiles, exportStl, exportWled } from '../core/api';
+import { getProjectRoot, listPatterns, onPatternsChanged } from '../core/patternRuntime';
 
 const COLOR_ORDERS: ColorOrderName[] = ['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR'];
 
@@ -10,6 +10,7 @@ export function Inspector() {
   const panel = useStore(selectActivePanel);
   const shape = useStore(selectActiveShape);
   const updatePanel = useStore((s) => s.updatePanel);
+  const resizeLedGrid = useStore((s) => s.resizeLedGrid);
   const colorConfig = useStore((s) => s.colorConfig);
   const setColorConfig = useStore((s) => s.setColorConfig);
   const activePatternPath = useStore((s) => s.project.activePatternPath);
@@ -17,9 +18,16 @@ export function Inspector() {
   const playing = useStore((s) => s.playing);
   const setPlaying = useStore((s) => s.setPlaying);
 
-  const [busy, setBusy] = useState<'idle' | 'tessellate' | 'map'>('idle');
+  const [busy, setBusy] = useState<
+    'idle' | 'tessellate' | 'map' | 'export-stl' | 'export-wled'
+  >('idle');
   const [error, setError] = useState<string | null>(null);
   const [patternNames, setPatternNames] = useState<string[]>([]);
+  const [stlHeight, setStlHeight] = useState(3);
+  const [stlHollow, setStlHollow] = useState(false);
+  const [stlWallThickness, setStlWallThickness] = useState(1.5);
+  const [stlCapThickness, setStlCapThickness] = useState(1.0);
+  const [lastExport, setLastExport] = useState<string | null>(null);
 
   // Populate pattern list on mount and whenever the watcher fires.
   useEffect(() => {
@@ -130,6 +138,70 @@ export function Inspector() {
     }
   }
 
+  async function makeOutputDir(): Promise<string> {
+    const root = await getProjectRoot();
+    const sep = root.includes('\\') ? '\\' : '/';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${root}${sep}exports${sep}${stamp}`;
+  }
+
+  async function runExportStl() {
+    if (!shape) {
+      setError('Import an SVG shape first.');
+      return;
+    }
+    setBusy('export-stl');
+    setError(null);
+    try {
+      // Canonical polygon: source shape scaled by the user's current scale.
+      // Rotation is intentionally omitted — the physical print shape is the
+      // same regardless of how copies are rotated at placement time.
+      const s = transform.scale;
+      const scaled = shape.polygon.map(([x, y]) => [x * s, y * s] as [number, number]);
+      const dir = await makeOutputDir();
+      const sep = dir.includes('\\') ? '\\' : '/';
+      const outPath = `${dir}${sep}lizard.stl`;
+      const resp = await exportStl({
+        polygon: scaled,
+        height_mm: stlHeight,
+        out_path: outPath,
+        name: shape.name || 'lizard',
+        wall_thickness_mm: stlHollow ? stlWallThickness : 0,
+        cap_thickness_mm: stlHollow ? stlCapThickness : 0,
+      });
+      setLastExport(resp.path);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy('idle');
+    }
+  }
+
+  async function runExportWled() {
+    if (Object.keys(panel.mapping.tileLeds).length === 0) {
+      setError('No mapping yet — run Map LEDs first.');
+      return;
+    }
+    setBusy('export-wled');
+    setError(null);
+    try {
+      const dir = await makeOutputDir();
+      const resp = await exportWled({
+        tile_leds: panel.mapping.tileLeds,
+        total_leds: panel.ledLayout.positions.length,
+        out_dir: dir,
+        preset_name: `Lizard ${panel.ledLayout.cols}x${panel.ledLayout.rows}`,
+      });
+      setLastExport(
+        `${resp.segments} segments · ${resp.mapped_leds} LEDs mapped → ${resp.preset_path}`,
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy('idle');
+    }
+  }
+
   const tileCount = panel.tiling.tiles.length;
   const mappedLeds = Object.values(panel.mapping.tileLeds).reduce(
     (n, idxs) => n + idxs.length,
@@ -142,8 +214,49 @@ export function Inspector() {
 
       <section className="section">
         <h3>Panel</h3>
-        <Field label="LEDs">{panel.ledLayout.positions.length}</Field>
-        <Field label="Pitch (mm)">{panel.ledLayout.pitchMm}</Field>
+        <Field label="Cols">
+          <input
+            type="number"
+            min={1}
+            max={256}
+            step={1}
+            value={panel.ledLayout.cols}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (!Number.isFinite(v) || v < 1) return;
+              resizeLedGrid(panel.id, v, panel.ledLayout.rows, panel.ledLayout.pitchMm);
+            }}
+          />
+        </Field>
+        <Field label="Rows">
+          <input
+            type="number"
+            min={1}
+            max={256}
+            step={1}
+            value={panel.ledLayout.rows}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (!Number.isFinite(v) || v < 1) return;
+              resizeLedGrid(panel.id, panel.ledLayout.cols, v, panel.ledLayout.pitchMm);
+            }}
+          />
+        </Field>
+        <Field label="Pitch (mm)">
+          <input
+            type="number"
+            min={1}
+            max={100}
+            step={0.5}
+            value={panel.ledLayout.pitchMm}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (!Number.isFinite(v) || v <= 0) return;
+              resizeLedGrid(panel.id, panel.ledLayout.cols, panel.ledLayout.rows, v);
+            }}
+          />
+        </Field>
+        <Field label="Total LEDs">{panel.ledLayout.positions.length}</Field>
         <Field label="Color order">
           <select
             value={panel.ledLayout.colorOrder}
@@ -332,6 +445,79 @@ export function Inspector() {
             <div className="hint dim">
               Map LEDs first to see tile-driven patterns light up.
             </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="section">
+        <h3>Export</h3>
+        <Field label="STL height (mm)">
+          <input
+            type="number"
+            min={0.5}
+            max={50}
+            step={0.5}
+            value={stlHeight}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (Number.isFinite(v) && v > 0) setStlHeight(v);
+            }}
+          />
+        </Field>
+        <Field label="Hollow wall">
+          <input
+            type="checkbox"
+            checked={stlHollow}
+            onChange={(e) => setStlHollow(e.target.checked)}
+          />
+        </Field>
+        {stlHollow ? (
+          <>
+            <Field label="Wall thickness (mm)">
+              <input
+                type="number"
+                min={0.2}
+                max={20}
+                step={0.1}
+                value={stlWallThickness}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v) && v > 0) setStlWallThickness(v);
+                }}
+              />
+            </Field>
+            <Field label="Cap thickness (mm, 0 = open top)">
+              <input
+                type="number"
+                min={0}
+                max={20}
+                step={0.1}
+                value={stlCapThickness}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v) && v >= 0) setStlCapThickness(v);
+                }}
+              />
+            </Field>
+          </>
+        ) : null}
+        <div className="stack">
+          <button
+            className="btn"
+            disabled={!shape || busy !== 'idle'}
+            onClick={runExportStl}
+          >
+            {busy === 'export-stl' ? 'Exporting…' : 'Export lizard STL'}
+          </button>
+          <button
+            className="btn"
+            disabled={mappedLeds === 0 || busy !== 'idle'}
+            onClick={runExportWled}
+          >
+            {busy === 'export-wled' ? 'Exporting…' : 'Export WLED preset + ledmap'}
+          </button>
+          {lastExport ? (
+            <div className="hint">Wrote: {lastExport}</div>
           ) : null}
         </div>
       </section>

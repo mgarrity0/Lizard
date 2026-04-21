@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.9",
     "shapely>=2.0",
     "trimesh>=4.5",
+    "mapbox-earcut>=1.0",
     "svgpathtools>=1.6",
     "svgelements>=1.9",
     "numpy>=1.26,<2.2",

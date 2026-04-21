@@ -18,6 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from tessera import __version__
+from tessera.export import (
+    StlExportRequest,
+    WledExportRequest,
+    export_stl,
+    export_wled,
+)
 from tessera.mapping import PlacedTileRef, map_leds_to_tiles
 from tessera.shapes import decode_data_source, import_shape_from_svg
 from tessera.tessellate import ClipBounds, Transform2D, tessellate
@@ -103,6 +109,36 @@ class MapRequest(BaseModel):
 
 class MapResponse(BaseModel):
     mapping: dict[str, list[int]]
+
+
+class StlExportApiRequest(BaseModel):
+    polygon: list[tuple[float, float]]
+    height_mm: float = 3.0
+    out_path: str
+    name: str = "lizard"
+    wall_thickness_mm: float = 0.0
+    cap_thickness_mm: float = 0.0
+
+
+class StlExportApiResponse(BaseModel):
+    path: str
+
+
+class WledExportApiRequest(BaseModel):
+    tile_leds: dict[str, list[int]]
+    total_leds: int
+    out_dir: str
+    preset_id: int = 1
+    preset_name: str = "Lizard tessellation"
+    ledmap_id: int = 1
+
+
+class WledExportApiResponse(BaseModel):
+    mapping_path: str
+    ledmap_path: str
+    preset_path: str
+    segments: int
+    mapped_leds: int
 
 
 def create_app() -> FastAPI:
@@ -198,6 +234,40 @@ def create_app() -> FastAPI:
             led_radius=req.led_radius,
         )
         return MapResponse(mapping=mapping)
+
+    @app.post("/api/export/stl", response_model=StlExportApiResponse)
+    def export_stl_route(req: StlExportApiRequest) -> StlExportApiResponse:
+        try:
+            path = export_stl(
+                StlExportRequest(
+                    polygon=req.polygon,
+                    height_mm=req.height_mm,
+                    out_path=req.out_path,
+                    name=req.name,
+                    wall_thickness_mm=req.wall_thickness_mm,
+                    cap_thickness_mm=req.cap_thickness_mm,
+                )
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return StlExportApiResponse(path=path)
+
+    @app.post("/api/export/wled", response_model=WledExportApiResponse)
+    def export_wled_route(req: WledExportApiRequest) -> WledExportApiResponse:
+        try:
+            result = export_wled(
+                WledExportRequest(
+                    tile_leds=req.tile_leds,
+                    total_leds=req.total_leds,
+                    out_dir=req.out_dir,
+                    preset_id=req.preset_id,
+                    preset_name=req.preset_name,
+                    ledmap_id=req.ledmap_id,
+                )
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return WledExportApiResponse(**result)
 
     return app
 
