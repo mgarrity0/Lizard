@@ -71,6 +71,7 @@ export function Inspector() {
         },
         lattice_scale: panel.tiling.latticeScale,
         anchor: panel.tiling.rotationAnchor,
+        pivots: shape.pivots,
       });
       const tiles: PlacedTile[] = resp.tiles.map((t) => ({
         id: t.tile_id,

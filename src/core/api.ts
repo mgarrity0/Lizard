@@ -79,6 +79,7 @@ export type ShapeImportResponse = {
   height: number;
   symmetry_hint: "p1" | "p2" | "p3" | "p4" | "p6";
   rotation_anchor: [number, number];
+  pivots: Array<[number, number]>;
 };
 
 export async function importSvgShape(
@@ -110,6 +111,7 @@ export type TessellateRequest = {
   clip_bounds: { min_x: number; min_y: number; max_x: number; max_y: number };
   lattice_scale?: number;
   anchor?: [number, number];
+  pivots?: Array<[number, number]>;
 };
 
 export type TessellateResponse = {

@@ -33,6 +33,16 @@ class ImportedShape:
     height: float
     symmetry_hint: SymmetryGroup
     rotation_anchor: tuple[float, float]
+    # The tile's 3-fold rotation centres in motif-local (centred) coords. Empty
+    # for hand-drawn SVGs that carry no metadata; populated by generator tiles
+    # via the `data-p3-pivots` root attribute. The tessellator uses the
+    # distance between the first two pivots as the lattice constant, so
+    # interlock happens automatically for tiles that carry this metadata.
+    pivots: list[tuple[float, float]]
+    # Offset that was subtracted to centre the polygon on origin. Tools that
+    # need to emit back-to-SVG coordinates (e.g. pivot injection scripts) add
+    # this to centred-frame points to recover SVG-space coordinates.
+    center_offset: tuple[float, float] = (0.0, 0.0)
 
 
 def import_shape_from_svg(svg_bytes: bytes) -> ImportedShape:
@@ -46,6 +56,11 @@ def import_shape_from_svg(svg_bytes: bytes) -> ImportedShape:
     text = svg_bytes.decode("utf-8", errors="replace")
     text = _strip_default_namespace(text)
     root = ET.fromstring(text)
+
+    # Optional self-describing metadata: `<svg data-p3-pivots="x1,y1 x2,y2 x3,y3">`
+    # Each pivot is in SVG-local coords. The first entry is the primary 3-fold
+    # centre — used to auto-seed the rotation anchor below.
+    pivots_attr = root.get("data-p3-pivots")
 
     rings: list[list[tuple[float, float]]] = []
     for path_el in root.iter("path"):
@@ -92,13 +107,35 @@ def import_shape_from_svg(svg_bytes: bytes) -> ImportedShape:
     width = max(xs) - min(xs)
     height = max(ys) - min(ys)
 
+    # Translate embedded pivots into motif-local (centred) coords. Empty list
+    # if the SVG carries no metadata — tessellator falls back to bbox heuristic.
+    pivots = _parse_pivots(pivots_attr, cx, cy)
+    rotation_anchor = pivots[0] if pivots else (0.0, 0.0)
+
     return ImportedShape(
         polygon=centred,
         width=width,
         height=height,
         symmetry_hint=_guess_symmetry(centred),
-        rotation_anchor=(0.0, 0.0),
+        rotation_anchor=rotation_anchor,
+        pivots=pivots,
+        center_offset=(cx, cy),
     )
+
+
+def _parse_pivots(
+    attr: str | None, cx: float, cy: float
+) -> list[tuple[float, float]]:
+    if not attr:
+        return []
+    out: list[tuple[float, float]] = []
+    for tok in attr.strip().split():
+        try:
+            px_str, py_str = tok.split(",")
+            out.append((float(px_str) - cx, float(py_str) - cy))
+        except (ValueError, IndexError):
+            continue
+    return out
 
 
 def decode_data_source(kind: str, data_b64: str) -> bytes:

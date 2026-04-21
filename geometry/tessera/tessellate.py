@@ -60,9 +60,12 @@ def tessellate(
     clip_bounds: ClipBounds,
     lattice_scale: float = 1.0,
     anchor: tuple[float, float] = (0.0, 0.0),
+    pivots: list[tuple[float, float]] | None = None,
 ) -> list[PlacedTile]:
     if group == "p3":
-        return _tessellate_p3(polygon, global_transform, clip_bounds, lattice_scale, anchor)
+        return _tessellate_p3(
+            polygon, global_transform, clip_bounds, lattice_scale, anchor, pivots or []
+        )
     raise NotImplementedError(f"group {group} not implemented yet")
 
 
@@ -75,20 +78,42 @@ def _tessellate_p3(
     clip: ClipBounds,
     lattice_scale: float,
     anchor: tuple[float, float],
+    pivots: list[tuple[float, float]],
 ) -> list[PlacedTile]:
-    # Derive a lattice constant from the motif's bounding box. Default picks
-    # the larger bbox dimension so three rotated copies at each lattice point
-    # roughly touch without overlapping; ``lattice_scale`` lets the user
-    # dial it in (values <1 tighten, >1 loosen).
-    arr = np.asarray(motif, dtype=float)
-    bbox_w = float(arr[:, 0].max() - arr[:, 0].min())
-    bbox_h = float(arr[:, 1].max() - arr[:, 1].min())
-    motif_span = max(bbox_w, bbox_h)
-    lattice_const = motif_span * max(lattice_scale, 0.01)
-
-    # Hex lattice basis in motif-local units.
-    ax, ay = lattice_const, 0.0
-    bx, by = lattice_const * 0.5, lattice_const * math.sqrt(3) / 2
+    # Derive lattice basis vectors from the pivot triangle. For a same-orbit p3
+    # tile (3 pivots forming an equilateral triangle, like regular hex or a
+    # typical Escher lizard), the primitive lattice has |a| = |b| = 3·|r|
+    # where r is the vector from the pivot-triangle centroid to pivot[0].
+    # Orientation of a follows r exactly (matches the tile's pivot-triangle
+    # rotation in the plane); b is rotated 60° CCW from a. With no pivots we
+    # fall back to an axis-aligned bbox-based lattice.
+    if len(pivots) >= 3:
+        p0, p1, p2 = pivots[:3]
+        cx_piv = (p0[0] + p1[0] + p2[0]) / 3.0
+        cy_piv = (p0[1] + p1[1] + p2[1]) / 3.0
+        rx = p0[0] - cx_piv
+        ry = p0[1] - cy_piv
+        scale_factor = 3.0 * max(lattice_scale, 0.01)
+        ax = rx * scale_factor
+        ay = ry * scale_factor
+        bx = ax * 0.5 - ay * (math.sqrt(3) / 2)
+        by = ax * (math.sqrt(3) / 2) + ay * 0.5
+        lattice_const = math.hypot(ax, ay)
+    elif len(pivots) >= 2:
+        px0, py0 = pivots[0]
+        px1, py1 = pivots[1]
+        pivot_dist = math.hypot(px1 - px0, py1 - py0)
+        lattice_const = pivot_dist * math.sqrt(3) * max(lattice_scale, 0.01)
+        ax, ay = lattice_const, 0.0
+        bx, by = lattice_const * 0.5, lattice_const * math.sqrt(3) / 2
+    else:
+        arr = np.asarray(motif, dtype=float)
+        bbox_w = float(arr[:, 0].max() - arr[:, 0].min())
+        bbox_h = float(arr[:, 1].max() - arr[:, 1].min())
+        motif_span = max(bbox_w, bbox_h)
+        lattice_const = motif_span * max(lattice_scale, 0.01)
+        ax, ay = lattice_const, 0.0
+        bx, by = lattice_const * 0.5, lattice_const * math.sqrt(3) / 2
 
     # Compute how many cells we need by mapping the (scaled, transformed)
     # clip bounds back into motif-local space.

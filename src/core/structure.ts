@@ -28,6 +28,11 @@ export type Shape = {
   symmetryGroup: SymmetryGroup;
   // Point around which the motif rotates (mm, in the polygon's local space).
   rotationAnchor: [number, number];
+  // All 3-fold rotation centres in motif-local coords. Empty for hand-drawn
+  // SVGs with no metadata; populated by generator tiles via `data-p3-pivots`.
+  // The tessellator uses the pivot-to-pivot distance to set the lattice
+  // constant, which is what makes tiles actually interlock.
+  pivots: Array<[number, number]>;
 };
 
 export type TileTransform = {

@@ -215,6 +215,20 @@ A reference generator lives at [geometry/scripts/generate_p3_tile.py](geometry/s
 
 Each also gets a sidecar `.json` with the exact pivot coordinates and lattice constant, so the anchor can be set programmatically instead of by eye.
 
+### Hand-drawn p3 tiles (auto-pivot detection)
+
+Generated tiles are easy because the pivots are known by construction. A hand-drawn motif like the Escher lizard at [assets/shapes/lizard.svg](assets/shapes/lizard.svg) doesn't carry that metadata — the tessellator needs to *find* the three 3-fold rotation centres on the outline.
+
+[geometry/scripts/find_pivots.py](geometry/scripts/find_pivots.py) does that in three phases:
+
+1. **Local arc-rotation error.** At every raw SVG vertex `i`, compute `RMS_k |rotate(poly[i+k], poly[i], ±120°) − poly[i−k]|` for `k=1..K`. At a true pivot, the forward arc maps onto the backward arc → tiny error. At a random vertex, error is ~tile size.
+2. **Non-max suppression + global-overlap filter.** Keep only vertices with arc-error ≤ 10% of tile span and ≤5% area overlap when the whole polygon is rotated 120° around them.
+3. **Equilateral triple search.** Brute-force all 3-combinations of survivors, keep those forming an approximately equilateral triangle (≤4% side deviation), then run the actual tessellator on each candidate and pick the triple with the smallest gap/overlap.
+
+The winning triple is written back as `data-p3-pivots="x1,y1 x2,y2 x3,y3"` on the root `<svg>`. Re-running [verify_lizard.py](geometry/scripts/verify_lizard.py) on the current lizard reports **0.0138% gap** with **98.26% central coverage** — small visible micro-gaps where the hand-drawn outline doesn't quite close, but the tile reads as a clean Escher tessellation.
+
+The lattice constant comes from the pivot triangle itself: `|a| = |b| = 3·|r|` where `r` goes from the pivot-triangle centroid to pivot[0]. Basis `b` is `a` rotated 60° CCW. So once `data-p3-pivots` is on the SVG, the tessellator interlocks with no manual tuning.
+
 p1 / p2 / p4 / p6 are stubbed but raise `NotImplementedError`.
 
 ---
@@ -293,7 +307,7 @@ Lizards/                               ← local path; repo is github.com/mgarri
 
 ## End-to-end target: the lizard panel
 
-1. Drop `assets/shapes/escher-lizard.svg` in place.
+1. Drop `assets/shapes/lizard.svg` in place — root carries `data-p3-pivots="..."` from `find_pivots.py` so import auto-seeds the rotation anchor and lattice constant.
 2. App loads SVG → shapely Polygon → warns on gap/overlap > ε.
 3. Scale slider: default lizard span ≈ 55 mm → ~25–36 LEDs/cell at 10 mm pitch.
 4. LED layout editor: 32×32 grid, 10 mm pitch, wiring topology picker.
@@ -326,8 +340,9 @@ Lizards/                               ← local path; repo is github.com/mgarri
 | LED → tile mapping             | done — `/api/map` + Map button + viewport colorize                    |
 | Pattern render loop            | done — `useFrame` in LedDots.tsx, drives InstancedMesh via mapping    |
 | Pattern hot-reload             | done — Rust `notify` + blob-URL dynamic import, reloads on file save  |
-| Seed patterns                  | done — `patterns/solid.js`, `patterns/tile-rainbow.js`                |
+| Seed patterns                  | done — `solid.js`, `tile-rainbow.js`, `contrast-tiles.js` (graph-coloured) |
 | p3 motif generator (Heesch)    | done — `geometry/scripts/generate_p3_tile.py` + 2 seed SVGs           |
+| Hand-drawn lizard p3 import    | done — `find_pivots.py` auto-detects, 0.0138% gap, 98.26% coverage    |
 | p1 / p2 / p4 / p6 tilers       | stubbed — raise `NotImplementedError`                                 |
 | LED layout editor (wiring UI)  | pending                                                               |
 | WLED UDP DDP + serial          | pending — port from VolumeCube                                        |
@@ -335,6 +350,24 @@ Lizards/                               ← local path; repo is github.com/mgarri
 | Splitter                       | pending                                                               |
 | Exporters (3MF/STL/DXF/WLED)   | pending                                                               |
 | `docs/PROJECT_BRIEF.md`        | pending                                                               |
+
+---
+
+## Next steps
+
+In rough priority order — each one unblocks something physical.
+
+1. **LED layout editor.** Replace the hard-coded 32×32 grid with a UI for picking pitch (10 mm), grid size, wiring topology (single serpentine vs multi-output), and per-output start corner. Needed before WLED preset export can produce sensible segment IDs. *Touches:* `src/components/Inspector.tsx`, `src/state/store.ts`, new `LayoutEditor.tsx`, `src/core/structure.ts` (`LedLayout`).
+2. **WLED UDP DDP client (Rust).** Port from VolumeCube. Tauri command `start_ddp(host, port)` spawns a tokio task that drains a frame channel and pushes packets to `udp://host:4048` at 60 fps. The webview hands it the same `Uint8Array` it already builds for the viewport. *Touches:* `src-tauri/src/lib.rs`, new `src-tauri/src/ddp.rs`, `src/core/patternRuntime.ts` (frame producer).
+3. **Single-lizard STL export.** Smallest end-to-end print test: extrude one lizard polygon to wall height, drop it as STL, slice it on the A1, glue an LED behind it. Validates extrusion + scale-to-mm + the printed-tile-fits-the-render assumption before splitter and 3MF complexity. *Touches:* new `geometry/tessera/extrude.py` (trimesh), `POST /api/export/stl/tile`, button in Inspector.
+4. **Panel splitter.** Tile a region, split into ≤250×210 mm Bambu A1 modules with tab+slot registration on the cut edges, preserve `tileId → moduleId`. *Touches:* new `geometry/tessera/split.py`, `POST /api/split`.
+5. **Multi-material 3MF (walls + skin).** trimesh + `lib3mf` or python wrappers around the 3MF spec. One mesh per material slot, mat-index 0 = black PETG walls, mat-index 1 = white PETG diffuser skin. Bambu AMS reads the slot index directly. *Touches:* new `geometry/tessera/threemf.py`, `POST /api/export/threemf`.
+6. **WLED preset JSON exporter.** One segment per lizard, stable IDs derived from `tileId`. Reuse Orbiter's preset shape. *Touches:* new `geometry/tessera/wled.py` or TS-side exporter (it's pure data).
+7. **Auxiliary STL/DXF.** Spacer frame around LED PCB footprint, registration jig with grid holes, acrylic-overlay DXF as a laser-cut alternative to the printed skin.
+8. **Pattern library expansion.** `contrast-tiles.js` is the start. Targets: animated waves that *respect* the graph-colouring (so motion doesn't reintroduce neighbour-blending), audio reactive (port from Orbiter), motion reactive (IMU input → tilt-driven palette).
+9. **`docs/PROJECT_BRIEF.md`.** Long-form design doc — the README is the public face; the brief captures the why for future-Matt.
+
+The lizard panel is the gate for declaring v1 done. Once one printed module is on the wall with WLED running a preset Tessera generated, the architecture has been validated end-to-end and the remaining work is breadth (more groups, more shapes, more outputs).
 
 ---
 

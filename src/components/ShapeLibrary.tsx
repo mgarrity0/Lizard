@@ -24,6 +24,7 @@ export function ShapeLibrary() {
         polygon: res.polygon,
         symmetryGroup: res.symmetry_hint,
         rotationAnchor: res.rotation_anchor,
+        pivots: res.pivots ?? [],
       };
       addShape(shape);
       setStatus(

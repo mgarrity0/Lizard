@@ -67,11 +67,27 @@ export const useStore = create<UiState>((set) => ({
 
   addShape: (shape) =>
     set((s) => ({
-      project: { ...s.project, shapes: [...s.project.shapes, shape] },
+      project: {
+        ...s.project,
+        shapes: [...s.project.shapes, shape],
+        panels: seedAnchorFromShape(s.project.panels, s.activePanelId, shape),
+      },
       activeShapeId: shape.id,
     })),
 
-  setActiveShape: (id) => set({ activeShapeId: id }),
+  setActiveShape: (id) =>
+    set((s) => {
+      const shape = id ? s.project.shapes.find((sh) => sh.id === id) ?? null : null;
+      return {
+        activeShapeId: id,
+        project: shape
+          ? {
+              ...s.project,
+              panels: seedAnchorFromShape(s.project.panels, s.activePanelId, shape),
+            }
+          : s.project,
+      };
+    }),
 
   updatePanel: (id, patch) =>
     set((s) => ({
@@ -99,4 +115,19 @@ export function selectActivePanel(s: UiState): Panel {
 export function selectActiveShape(s: UiState): Shape | null {
   if (!s.activeShapeId) return null;
   return s.project.shapes.find((sh) => sh.id === s.activeShapeId) ?? null;
+}
+
+function seedAnchorFromShape(panels: Panel[], activePanelId: string, shape: Shape): Panel[] {
+  return panels.map((p) =>
+    p.id === activePanelId
+      ? {
+          ...p,
+          tiling: {
+            ...p.tiling,
+            shapeId: shape.id,
+            rotationAnchor: shape.rotationAnchor,
+          },
+        }
+      : p,
+  );
 }

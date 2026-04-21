@@ -131,14 +131,21 @@ def write_svg(poly: list[Point], path: Path, pivots: list[Point] | None = None) 
     shifted = [(p[0] - minx, p[1] - miny) for p in poly]
     d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in shifted) + " Z"
     pivot_svg = ""
+    pivots_attr = ""
     if pivots:
-        for px, py in pivots:
-            pivot_svg += (f'  <circle cx="{px - minx:.3f}" cy="{py - miny:.3f}" '
+        shifted_pivots = [(p[0] - minx, p[1] - miny) for p in pivots]
+        for px, py in shifted_pivots:
+            pivot_svg += (f'  <circle cx="{px:.3f}" cy="{py:.3f}" '
                           f'r="3" fill="red"/>\n')
+        # Embed pivot coordinates (in SVG-local coords, post shift-to-origin)
+        # on the <svg> root so the importer can auto-seed the rotation anchor
+        # without a sidecar JSON. First pivot is the primary 3-fold centre.
+        pivots_str = " ".join(f"{x:.6f},{y:.6f}" for x, y in shifted_pivots)
+        pivots_attr = f' data-p3-pivots="{pivots_str}"'
     svg = (
         f'<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.3f}" height="{h:.3f}" '
-        f'viewBox="0 0 {w:.3f} {h:.3f}">\n'
+        f'viewBox="0 0 {w:.3f} {h:.3f}"{pivots_attr}>\n'
         f'  <path d="{d}" fill="#6ae3ff" fill-opacity="0.35" '
         f'stroke="#000" stroke-width="1.5"/>\n'
         f'{pivot_svg}'

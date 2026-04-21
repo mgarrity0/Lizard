@@ -48,6 +48,7 @@ class ShapeImportResponse(BaseModel):
     height: float
     symmetry_hint: str
     rotation_anchor: tuple[float, float]
+    pivots: list[tuple[float, float]] = []
 
 
 class ApiTransform(BaseModel):
@@ -70,6 +71,10 @@ class TessellateRequest(BaseModel):
     clip_bounds: ApiClipBounds
     lattice_scale: float = 1.0
     anchor: tuple[float, float] = (0.0, 0.0)
+    # 3-fold centres (motif-local coords). When present with >= 2 entries,
+    # the tessellator uses the pivot-to-pivot distance as the lattice
+    # constant — yielding proper p3 interlock without manual tuning.
+    pivots: list[tuple[float, float]] = []
 
 
 class ApiPlacedTile(BaseModel):
@@ -141,6 +146,7 @@ def create_app() -> FastAPI:
             height=shape.height,
             symmetry_hint=shape.symmetry_hint,
             rotation_anchor=shape.rotation_anchor,
+            pivots=shape.pivots,
         )
 
     @app.post("/api/tessellate", response_model=TessellateResponse)
@@ -162,6 +168,7 @@ def create_app() -> FastAPI:
                 ),
                 lattice_scale=req.lattice_scale,
                 anchor=req.anchor,
+                pivots=req.pivots,
             )
         except NotImplementedError as e:
             raise HTTPException(status_code=501, detail=str(e)) from e
