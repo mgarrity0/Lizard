@@ -32,37 +32,45 @@ A desktop app that takes a 2D shape (SVG/PNG/DXF/&hellip;), tessellates it acros
 - **Python sidecar:** Python 3.11 + FastAPI + shapely + trimesh + svgpathtools (optional: build123d, opencv), uv-managed at `geometry/.venv/`
 - **Persistence:** JSON `projects/*.json` with `formatVersion` field
 - **Testing:** Vitest + pytest + `cargo check` + `tsc --noEmit`
-- **Package mgmt:** pnpm (frontend) + uv (Python) + cargo (Rust)
+- **Package mgmt:** npm (frontend) + uv (Python) + cargo (Rust)
 
 ## Environment
 
-- **OS:** Windows 11. Dev in bash (Git for Windows). Forward slashes. Unix shell syntax (not PowerShell).
-- **Node:** `C:\Program Files\nodejs` — **not on bash PATH** by default. npm's global bin `C:\Users\Matt\AppData\Roaming\npm` *is* on PATH.
-- **pnpm:** installed via `npm i -g pnpm`, at `C:\Users\Matt\AppData\Roaming\npm\pnpm.cmd`. Corepack `enable` needs admin, so we skipped it.
-- **Rust:** rustup stable-x86_64-pc-windows-msvc, cargo at `C:\Users\Matt\.cargo\bin\`.
+- **OS:** Windows 11. Default shell is PowerShell (use `;` instead of `&&`). Git Bash works but requires adding `%APPDATA%\npm` and `%USERPROFILE%\.local\bin` to `PATH` manually.
+- **Node:** `C:\Program Files\nodejs` — on the standard Windows user PATH, ships with `npm`.
+- **Rust:** rustup stable-x86_64-pc-windows-msvc, cargo at `C:\Users\<you>\.cargo\bin\`.
 - **MSVC:** Visual Studio 2022 Build Tools (VCTools workload) at `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`. Required for Rust linking on Windows.
-- **Python:** `py -3` = 3.11.9. Use uv from `C:\Users\Matt\.local\bin\uv.exe`.
+- **Python + uv:** `uv` at `%USERPROFILE%\.local\bin\uv.exe`. `uv sync` auto-installs a compatible CPython if one isn't already usable.
 - **File I/O:** always `encoding="utf-8"`, `newline="\n"`. Set `PYTHONUTF8=1` in every spawned env (Rust shell does this).
-- **Any Node subprocess call from Python or Rust**: mirror MeshHub's `_node_env()` / `_find_npm()` / `_find_npx()` helpers; use `shell=True` on Windows.
 
 ## Dev commands
 
-```bash
+```powershell
 # One-time setup
-pnpm install
-cd geometry && uv sync && cd ..
+npm install
+cd geometry; uv sync; cd ..
 
 # Development
-pnpm tauri dev              # full desktop app (Rust spawns Python sidecar)
-pnpm dev                    # pure browser dev (sidecar must be run manually)
-cd geometry && uv run tessera-api --port 8765   # run sidecar standalone
+npm run tauri dev           # full desktop app (Rust spawns Python sidecar)
+npm run dev                 # pure browser dev (sidecar must be run manually)
+cd geometry; uv run tessera-api --port 8765   # run sidecar standalone
 
 # Checks
-pnpm typecheck
-pnpm test
-cd geometry && uv run pytest
-cd src-tauri && cargo check
+npm run typecheck
+npm test
+cd geometry; uv run pytest; cd ..
+cd src-tauri; cargo check; cd ..
 ```
+
+### Recovery
+
+If `npm run tauri dev` fails with "sidecar did not report ready" or a Rust link error, a zombie from a previous run is holding the port or the exe lock:
+
+```powershell
+taskkill /F /IM tessera.exe ; taskkill /F /IM python.exe
+```
+
+If uv ever warns about a venv linked to a non-existent interpreter, delete `geometry/.venv/` and re-run `uv sync`.
 
 ## Sidecar protocol
 
@@ -83,4 +91,4 @@ cd src-tauri && cargo check
 
 ## Memory
 
-Persistent memory at `C:\Users\Matt\.claude\projects\C--Users-Matt-Desktop-Lizards\memory\`. Read `MEMORY.md` at session start.
+Persistent memory at `C:\Users\<you>\.claude\projects\C--Users-<you>-Desktop-Claude-Lizard\memory\`. Read `MEMORY.md` at session start.

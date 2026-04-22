@@ -70,7 +70,7 @@ The sidecar will be bundled by PyInstaller and shipped via `tauri.conf.json` `bu
 | Hot-reload patterns    | `notify` (Rust) → `patterns-changed` event → Blob import | Ported from Orbiter                                          |
 | Persistence            | JSON `projects/*.json` with `formatVersion`              | Matches Orbiter; no SQLite unless we outgrow JSON            |
 | Testing                | Vitest + pytest + `cargo check` + `tsc --noEmit`         |                                                              |
-| Package managers       | pnpm (frontend) + uv (Python) + cargo (Rust)             |                                                              |
+| Package managers       | npm (frontend) + uv (Python) + cargo (Rust)              | npm ships with Node; no extra install step                   |
 
 ---
 
@@ -110,42 +110,42 @@ Default color order is `GRB` (WS2812), gamma 2.6, brightness 0.6. All knobs expo
 
 ### Prereqs (Windows)
 
-- **Node 20+** at `C:\Program Files\nodejs` (not on bash PATH by default — npm's global bin `%APPDATA%\npm` is on PATH, which is what we use).
-- **pnpm** — `npm i -g pnpm`. Corepack `enable` needs admin so we skipped it.
-- **Rust** — rustup `stable-x86_64-pc-windows-msvc`. Cargo at `C:\Users\<you>\.cargo\bin\cargo.exe` — **not on bash PATH**; invoke by absolute path when shelling in.
+- **Node 20+** at `C:\Program Files\nodejs` — ships with `npm`, already on the standard Windows user PATH.
+- **Rust** — rustup `stable-x86_64-pc-windows-msvc`. Cargo at `C:\Users\<you>\.cargo\bin\cargo.exe`.
 - **MSVC Build Tools 2022** (VCTools workload). Required for Rust linking on Windows.
-- **Python 3.11** via `py -3`. Use **uv** from `%USERPROFILE%\.local\bin\uv.exe`.
-- **Git Bash** (Git for Windows). Dev in bash, not PowerShell. Forward slashes everywhere.
+- **Python 3.11+** and **uv** at `%USERPROFILE%\.local\bin\uv.exe`. uv auto-installs a compatible Python on `uv sync` if you don't have one.
+- **Shell** — PowerShell works (use `;` instead of `&&`). Git Bash also works but requires manually adding `%APPDATA%\npm` and `%USERPROFILE%\.local\bin` to the bash `PATH`.
 
 Linux/macOS equivalents work too — drop the Windows-specific paths.
 
 ### One-time install
 
-```bash
-pnpm install
-cd geometry && uv sync && cd ..
+```powershell
+npm install
+cd geometry; uv sync; cd ..
 ```
 
 ### Dev loop
 
-```bash
-pnpm tauri dev                                  # full desktop app (Rust spawns Python sidecar)
-pnpm dev                                        # pure-browser dev; sidecar must be run by hand
-cd geometry && uv run tessera-api --port 8765   # run the sidecar standalone for debugging
+```powershell
+npm run tauri dev                               # full desktop app (Rust spawns Python sidecar)
+npm run dev                                     # pure-browser dev; sidecar must be run by hand
+cd geometry; uv run tessera-api --port 8765     # run the sidecar standalone for debugging
 ```
 
 ### Checks
 
-```bash
-pnpm typecheck                                  # tsc --noEmit
-pnpm test                                       # vitest
-cd geometry && uv run pytest
-cd src-tauri && cargo check
+```powershell
+npm run typecheck                               # tsc --noEmit
+npm test                                        # vitest
+cd geometry; uv run pytest; cd ..
+cd src-tauri; cargo check; cd ..
 ```
 
 ### Common gotchas
 
-- **Windows exe lock.** After editing Rust, the running `tessera.exe` holds the binary open and the next link fails. `taskkill //F //IM tessera.exe` before re-running `cargo check` or `pnpm tauri dev`.
+- **Stale processes hold the port and the exe lock.** If `npm run tauri dev` fails with "sidecar did not report ready" or a Rust link error, a previous run's `tessera.exe` / `python.exe` is still alive. Recover with `taskkill /F /IM tessera.exe` then `taskkill /F /IM python.exe` (PowerShell) or the `//F //IM` form in Git Bash. Then retry.
+- **Broken uv venv.** If uv ever cleans up the Python it used to create `geometry/.venv/`, the venv's `python.exe` shim starts throwing "No Python at …". Delete `geometry/.venv/` and re-run `uv sync` to rebuild against a current interpreter.
 - **Python encoding.** Always `encoding="utf-8"`, `newline="\n"`. Rust shell sets `PYTHONUTF8=1` in the spawned env.
 - **Windows Store Python alias.** If `python` prints "run without arguments to install…", use `py -3` instead — the alias takes precedence on a fresh Windows.
 - **Icons.** Tauri's Windows resource build requires `src-tauri/icons/{32x32.png, 128x128.png, 128x128@2x.png, icon.ico, icon.icns}`. Placeholder set is checked in.
