@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="200.000" height="173.205" viewBox="0 0 200.000 173.205" data-p3-pivots="200.000000,86.602540 50.000000,173.205081 50.000000,0.000000">
+  <path d="M 200.000,86.603 L 150.000,173.205 L 50.000,173.205 L 0.000,86.603 L 50.000,0.000 L 150.000,0.000 Z" fill="#6ae3ff" fill-opacity="0.35" stroke="#000" stroke-width="1.5"/>
+  <circle cx="200.000" cy="86.603" r="3" fill="red"/>
+  <circle cx="50.000" cy="173.205" r="3" fill="red"/>
+  <circle cx="50.000" cy="0.000" r="3" fill="red"/>
+</svg>
